@@ -1,129 +1,159 @@
 #include <iostream>
-#include <math.h>
-#include <functional>
-#include <stdlib.h> /* srand, rand */
-#include <time.h>   /* time */
+#include <cuda_runtime.h>
+#include <chrono>
+#include <cmath>
 
-#define ROW_TILE_WIDTH 32
-#define COL_TILE_WIDTH 32
+#define TILE_SIZE 16
 
-template <typename T>
-__global__ void naive_matrix_multiply(T *A, T *B, T *C, int width, int C_rows, int C_cols)
+// CUDA kernel: each thread computes one element of C
+__global__ void matrixMulCUDA(float *A, float *B, float *C, int M, int N, int K)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    // check boundry conditions
-    if (row < C_rows && col < C_cols)
+
+    if (row < M && col < K)
     {
-        // do the multiplication for one row and col
-        T value = 0;
-        for (int k = 0; k < width; k++)
+        float sum = 0.0f;
+
+        for (int i = 0; i < N; i++)
         {
-            value += A[row * width + k] * B[k * C_cols + col];
+            sum += A[row * N + i] * B[i * K + col];
         }
-        // store result
-        C[row * C_cols + col] = value;
+
+        C[row * K + col] = sum;
     }
 }
 
-template <typename T>
-void initialize_matrix(T *M, int rows, int cols, std::function<float()> F)
+// CPU serial matrix multiplication
+void matrixMulCPU(float *A, float *B, float *C, int M, int N, int K)
 {
-    for (int i = 0; i < rows; i++)
+    for (int row = 0; row < M; row++)
     {
-        for (int j = 0; j < cols; j++)
+        for (int col = 0; col < K; col++)
         {
-            M[i * cols + j] = F();
+            float sum = 0.0f;
+
+            for (int i = 0; i < N; i++)
+            {
+                sum += A[row * N + i] * B[i * K + col];
+            }
+
+            C[row * K + col] = sum;
         }
     }
 }
 
-template <typename T>
-void naive_matrix_multiply_cpu(T *A, T *B, T *C, int width, int C_rows, int C_cols)
+// Check CPU and GPU result
+bool checkResult(float *cpu, float *gpu, int size)
 {
-    for (int i = 0; i < C_rows; i++)
-        for (int j = 0; j < C_cols; j++)
+    for (int i = 0; i < size; i++)
+    {
+        if (fabs(cpu[i] - gpu[i]) > 1e-3)
         {
-            T value = 0.0f;
-            for (int k = 0; k < width; k++)
-            {
-                value += A[i * width + k] * B[k * C_cols + j];
-            }
-            C[i * C_cols + j] = value;
+            return false;
         }
-}
-
-template <typename T>
-bool check_equal(T *A1, T *A2, int rows, int cols)
-{
-    for (int i = 0; i < rows; i++)
-        for (int j = 0; j < cols; j++)
-        {
-            if (abs(A1[i * cols + j] - A2[i * cols + j]) > 0.00001)
-            {
-                return false;
-            }
-        }
-
+    }
     return true;
 }
 
-int main(void)
+int main()
 {
-    int A_rows = 1 << 8;
-    int A_cols = 1 << 10;
-    int B_rows = A_cols;
-    int B_cols = 1 << 12;
-    int C_rows = A_rows;
-    int C_cols = B_cols;
-    int A_size = A_rows * A_cols;
-    int B_size = B_rows * B_cols;
-    int C_size = C_rows * C_cols;
-    float *A, *B, *C, *C_cpu;
+    // Matrix dimensions:
+    // A = M x N
+    // B = N x K
+    // C = M x K
+    int M = 512;
+    int N = 512;
+    int K = 512;
 
-    // Allocate Unified Memory – accessible from CPU or GPU
-    cudaMallocManaged(&A, A_size * sizeof(float));
-    cudaMallocManaged(&B, B_size * sizeof(float));
-    cudaMallocManaged(&C, C_size * sizeof(float));
-    cudaMallocManaged(&C_cpu, C_size * sizeof(float));
+    int sizeA = M * N;
+    int sizeB = N * K;
+    int sizeC = M * K;
 
-    // initialize A and B matrices
-    auto all_ones = []() -> float
-    {
-        return 1.0f;
-    };
+    size_t bytesA = sizeA * sizeof(float);
+    size_t bytesB = sizeB * sizeof(float);
+    size_t bytesC = sizeC * sizeof(float);
 
-    srand(time(NULL));
-    auto rand_numbers = []() -> float
-    {
-        auto f = static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 1000));
-        int n = static_cast<int>(f);
-        return static_cast<float>(n);
-    };
+    // Host memory
+    float *h_A = new float[sizeA];
+    float *h_B = new float[sizeB];
+    float *h_C_cpu = new float[sizeC];
+    float *h_C_gpu = new float[sizeC];
 
-    initialize_matrix<float>(A, A_rows, A_cols, rand_numbers);
-    initialize_matrix<float>(B, B_rows, B_cols, rand_numbers);
+    // Initialize matrices
+    for (int i = 0; i < sizeA; i++)
+        h_A[i] = 1.0f;
 
-    dim3 dim_grid(C_cols / COL_TILE_WIDTH, C_rows / ROW_TILE_WIDTH, 1);
-    dim3 dim_block(COL_TILE_WIDTH, ROW_TILE_WIDTH, 1);
+    for (int i = 0; i < sizeB; i++)
+        h_B[i] = 1.0f;
 
-    naive_matrix_multiply<float><<<dim_grid, dim_block>>>(A, B, C, A_cols, C_rows, C_cols);
+    // ---------------- CPU SERIAL MULTIPLICATION ----------------
+    auto cpu_start = std::chrono::high_resolution_clock::now();
 
-    // Wait for GPU to finish before accessing on host
-    cudaDeviceSynchronize();
+    matrixMulCPU(h_A, h_B, h_C_cpu, M, N, K);
 
-    // check results
-    naive_matrix_multiply_cpu<float>(A, B, C_cpu, A_cols, C_rows, C_cols);
+    auto cpu_end = std::chrono::high_resolution_clock::now();
 
-    if (check_equal<float>(C, C_cpu, C_rows, C_cols))
-        std::cout << "PASS" << std::endl;
+    double cpu_time = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
+
+    // ---------------- CUDA PARALLEL MULTIPLICATION ----------------
+
+    float *d_A, *d_B, *d_C;
+
+    cudaMalloc(&d_A, bytesA);
+    cudaMalloc(&d_B, bytesB);
+    cudaMalloc(&d_C, bytesC);
+
+    cudaMemcpy(d_A, h_A, bytesA, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, h_B, bytesB, cudaMemcpyHostToDevice);
+
+    dim3 block(TILE_SIZE, TILE_SIZE);
+
+    dim3 grid(
+        (K + TILE_SIZE - 1) / TILE_SIZE,
+        (M + TILE_SIZE - 1) / TILE_SIZE
+    );
+
+    cudaEvent_t gpu_start, gpu_end;
+    cudaEventCreate(&gpu_start);
+    cudaEventCreate(&gpu_end);
+
+    cudaEventRecord(gpu_start);
+
+    matrixMulCUDA<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+
+    cudaEventRecord(gpu_end);
+    cudaEventSynchronize(gpu_end);
+
+    float gpu_time = 0.0f;
+    cudaEventElapsedTime(&gpu_time, gpu_start, gpu_end);
+
+    cudaMemcpy(h_C_gpu, d_C, bytesC, cudaMemcpyDeviceToHost);
+
+    // ---------------- RESULT CHECK ----------------
+
+    bool result = checkResult(h_C_cpu, h_C_gpu, sizeC);
+
+    std::cout << "CPU Serial Time: " << cpu_time << " ms" << std::endl;
+    std::cout << "CUDA Parallel Time: " << gpu_time << " ms" << std::endl;
+
+    if (result)
+        std::cout << "Result: PASS" << std::endl;
     else
-        std::cout << "FAIL" << std::endl;
+        std::cout << "Result: FAIL" << std::endl;
 
     // Free memory
-    cudaFree(A);
-    cudaFree(B);
-    cudaFree(C);
+    delete[] h_A;
+    delete[] h_B;
+    delete[] h_C_cpu;
+    delete[] h_C_gpu;
+
+    cudaFree(d_A);
+    cudaFree(d_B);
+    cudaFree(d_C);
+
+    cudaEventDestroy(gpu_start);
+    cudaEventDestroy(gpu_end);
 
     return 0;
 }
