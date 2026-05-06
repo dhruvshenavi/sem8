@@ -1,0 +1,706 @@
+\\HPC1
+
+#include <bits/stdc++.h>
+
+using namespace std;
+
+class TreeNode
+{
+public:
+    int val;
+    TreeNode *left;
+    TreeNode *right;
+    TreeNode(int x) : val(x), left(NULL), right(NULL) {}
+};
+
+void bfs(TreeNode *root)
+{
+    queue<TreeNode *> q;
+    q.push(root);
+    while (!q.empty())
+    {
+        TreeNode *node = q.front();
+        q.pop();
+        cout << node->val << " ";
+        if (node->left)
+        {
+            q.push(node->left);
+        }
+        if (node->right)
+        {
+            q.push(node->right);
+        }
+    }
+}
+
+void dfs(TreeNode *root)
+{
+    stack<TreeNode *> s;
+    s.push(root);
+    while (!s.empty())
+    {
+        TreeNode *node = s.top();
+        s.pop();
+        cout << node->val << " ";
+        if (node->right)
+        {
+            s.push(node->right);
+        }
+        if (node->left)
+        {
+            s.push(node->left);
+        }
+    }
+}
+
+void parallel_bfs(TreeNode *root)
+{
+    queue<TreeNode *> q;
+    q.push(root);
+    while (!q.empty())
+    {
+        int qSize = q.size();
+#pragma omp parallel
+        {
+#pragma omp for
+            for (int i = 0; i < qSize; i++)
+            {
+                TreeNode *node;
+#pragma omp critical
+                {
+                    node = q.front();
+                    q.pop();
+                }
+                cout << node->val << " ";
+                if (node->left)
+                {
+#pragma omp critical
+                    q.push(node->left);
+                }
+                if (node->right)
+                {
+#pragma omp critical
+                    q.push(node->right);
+                }
+            }
+        }
+    }
+}
+
+void parallel_dfs(TreeNode *root)
+{
+    stack<TreeNode *> s;
+    s.push(root);
+    while (!s.empty())
+    {
+        int sSize = s.size();
+#pragma omp parallel
+        {
+#pragma omp for
+            for (int i = 0; i < sSize; i++)
+            {
+                TreeNode *node;
+#pragma omp critical
+                {
+                    node = s.top();
+                    s.pop();
+                }
+                cout << node->val << " ";
+                if (node->right)
+#pragma omp critical
+                    s.push(node->right);
+                if (node->left)
+#pragma omp critical
+                    s.push(node->left);
+            }
+        }
+    }
+}
+
+int main()
+{
+    TreeNode *root = new TreeNode(1);
+    root->left = new TreeNode(2);
+    root->right = new TreeNode(3);
+    root->left->left = new TreeNode(4);
+    root->left->right = new TreeNode(5);
+    root->right->left = new TreeNode(6);
+    root->right->right = new TreeNode(7);
+
+    cout << "BFS traversal: ";
+    auto start = chrono::high_resolution_clock::now();
+    bfs(root);
+    auto end = chrono::high_resolution_clock::now();
+    cout << "\nBFS took " << chrono::duration_cast<chrono::microseconds>(end - start).count() << " microseconds." << endl;
+    cout << endl;
+
+    cout << "Parallel BFS traversal: ";
+    start = chrono::high_resolution_clock::now();
+    parallel_bfs(root);
+    end = chrono::high_resolution_clock::now();
+    cout << "\nParallel BFS took " << chrono::duration_cast<chrono::microseconds>(end - start).count() << " microseconds." << endl;
+
+    cout << "---------------------------------------------------------" << endl;
+
+    cout << "DFS traversal: ";
+    start = chrono::high_resolution_clock::now();
+    dfs(root);
+    end = chrono::high_resolution_clock::now();
+    cout << "\nDFS took " << chrono::duration_cast<chrono::microseconds>(end - start).count() << " microseconds." << endl;
+    cout << endl;
+
+    cout << "Parallel DFS traversal: ";
+    start = chrono::high_resolution_clock::now();
+    parallel_dfs(root);
+    end = chrono::high_resolution_clock::now();
+    cout << "\nParallel DFS took " << chrono::duration_cast<chrono::microseconds>(end - start).count() << " microseconds." << endl;
+
+    return 0;
+}
+
+\\HPC2
+
+#include <iostream>
+#include <vector>
+#include <omp.h>
+using namespace std;
+
+// ------------------- Bubble Sort (Sequential) -------------------
+void bubbleSortSequential(vector<int>& arr) {
+    int n = arr.size();
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if (arr[j] > arr[j + 1])
+                swap(arr[j], arr[j + 1]);
+        }
+    }
+}
+
+// ------------------- Bubble Sort (Parallel - Odd Even) -------------------
+void bubbleSortParallel(vector<int>& arr) {
+    int n = arr.size();
+
+    for (int i = 0; i < n; i++) {
+
+        // Even phase
+        #pragma omp parallel for
+        for (int j = 0; j < n - 1; j += 2) {
+            if (arr[j] > arr[j + 1])
+                swap(arr[j], arr[j + 1]);
+        }
+
+        // Odd phase
+        #pragma omp parallel for
+        for (int j = 1; j < n - 1; j += 2) {
+            if (arr[j] > arr[j + 1])
+                swap(arr[j], arr[j + 1]);
+        }
+    }
+}
+
+// ------------------- Merge Function -------------------
+void merge(vector<int>& arr, int l, int m, int r) {
+    vector<int> temp;
+    int i = l, j = m + 1;
+
+    while (i <= m && j <= r) {
+        if (arr[i] < arr[j])
+            temp.push_back(arr[i++]);
+        else
+            temp.push_back(arr[j++]);
+    }
+
+    while (i <= m) temp.push_back(arr[i++]);
+    while (j <= r) temp.push_back(arr[j++]);
+
+    for (int k = l; k <= r; k++)
+        arr[k] = temp[k - l];
+}
+
+// ------------------- Merge Sort (Sequential) -------------------
+void mergeSortSequential(vector<int>& arr, int l, int r) {
+    if (l < r) {
+        int m = (l + r) / 2;
+        mergeSortSequential(arr, l, m);
+        mergeSortSequential(arr, m + 1, r);
+        merge(arr, l, m, r);
+    }
+}
+
+// ------------------- Merge Sort (Parallel using Tasks) -------------------
+void mergeSortParallel(vector<int>& arr, int l, int r) {
+    if (l < r) {
+        int m = (l + r) / 2;
+
+        // Threshold to avoid too many tasks
+        if (r - l < 1000) {
+            mergeSortSequential(arr, l, r);
+        } else {
+            #pragma omp task shared(arr)
+            mergeSortParallel(arr, l, m);
+
+            #pragma omp task shared(arr)
+            mergeSortParallel(arr, m + 1, r);
+
+            #pragma omp taskwait
+            merge(arr, l, m, r);
+        }
+    }
+}
+
+// ------------------- Main -------------------
+int main() {
+    int n;
+    cout << "Enter number of elements: ";
+    cin >> n;
+
+    vector<int> arr(n);
+
+    cout << "Enter elements:\n";
+    for (int i = 0; i < n; i++)
+        cin >> arr[i];
+
+    vector<int> arr1 = arr;
+    vector<int> arr2 = arr;
+    vector<int> arr3 = arr;
+    vector<int> arr4 = arr;
+
+    // -------- Bubble Sequential --------
+    double start = omp_get_wtime();
+    bubbleSortSequential(arr1);
+    double end = omp_get_wtime();
+    cout << "\nSequential Bubble Sort Time: " << (end - start) << " sec";
+
+    // -------- Bubble Parallel --------
+    start = omp_get_wtime();
+    bubbleSortParallel(arr2);
+    end = omp_get_wtime();
+    cout << "\nParallel Bubble Sort Time: " << (end - start) << " sec";
+
+    // -------- Merge Sequential --------
+    start = omp_get_wtime();
+    mergeSortSequential(arr3, 0, n - 1);
+    end = omp_get_wtime();
+    cout << "\nSequential Merge Sort Time: " << (end - start) << " sec";
+
+    // -------- Merge Parallel --------
+    start = omp_get_wtime();
+
+    #pragma omp parallel
+    {
+        #pragma omp single
+        mergeSortParallel(arr4, 0, n - 1);
+    }
+
+    end = omp_get_wtime();
+    cout << "\nParallel Merge Sort Time: " << (end - start) << " sec";
+
+    // -------- Print Sorted Output --------
+    cout << "\n\nSorted array (Merge Parallel): ";
+    for (int x : arr4)
+        cout << x << " ";
+
+    cout << endl;
+
+    return 0;
+}
+
+\\HPC3
+
+#include <iostream>
+#include <vector>
+#include <omp.h>
+#include <climits>
+using namespace std;
+
+int main() {
+    int n;
+    cout << "Enter number of elements: ";
+    cin >> n;
+
+    vector<int> arr(n);
+
+    cout << "Enter elements:\n";
+    for (int i = 0; i < n; i++)
+        cin >> arr[i];
+
+    // ------------------- Sequential -------------------
+    int min_val = INT_MAX, max_val = INT_MIN, sum = 0;
+
+    double start = omp_get_wtime();
+
+    for (int i = 0; i < n; i++) {
+        if (arr[i] < min_val)
+            min_val = arr[i];
+
+        if (arr[i] > max_val)
+            max_val = arr[i];
+
+        sum += arr[i];
+    }
+
+    double end = omp_get_wtime();
+
+    double avg = (double)sum / n;
+
+    cout << "\n--- Sequential Results ---\n";
+    cout << "Min: " << min_val << endl;
+    cout << "Max: " << max_val << endl;
+    cout << "Sum: " << sum << endl;
+    cout << "Average: " << avg << endl;
+    cout << "Time: " << (end - start) << " sec\n";
+
+    // ------------------- Parallel -------------------
+    int p_min = INT_MAX, p_max = INT_MIN, p_sum = 0;
+
+    start = omp_get_wtime();
+
+    #pragma omp parallel for reduction(min:p_min) reduction(max:p_max) reduction(+:p_sum)
+    for (int i = 0; i < n; i++) {
+        if (arr[i] < p_min)
+            p_min = arr[i];
+
+        if (arr[i] > p_max)
+            p_max = arr[i];
+
+        p_sum += arr[i];
+    }
+
+    end = omp_get_wtime();
+
+    double p_avg = (double)p_sum / n;
+
+    cout << "\n--- Parallel Results ---\n";
+    cout << "Min: " << p_min << endl;
+    cout << "Max: " << p_max << endl;
+    cout << "Sum: " << p_sum << endl;
+    cout << "Average: " << p_avg << endl;
+    cout << "Time: " << (end - start) << " sec\n";
+
+    return 0;
+}
+
+\\HPC4
+
+#include <stdio.h>
+#include <cuda_runtime.h>
+
+// ---------------- VECTOR ADDITION ----------------
+__global__ void vectorAdd(int *A, int *B, int *C, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N) {
+        C[i] = A[i] + B[i];
+    }
+}
+
+// ---------------- MATRIX MULTIPLICATION ----------------
+__global__ void matrixMultiply(int *A, int *B, int *C, int N) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < N && col < N) {
+        int sum = 0;
+        for (int k = 0; k < N; k++) {
+            sum += A[row * N + k] * B[k * N + col];
+        }
+        C[row * N + col] = sum;
+    }
+}
+
+int main() {
+
+    // ================= VECTOR ADDITION =================
+    int N1;
+    printf("Enter size of vector: ");
+    scanf("%d", &N1);
+
+    int size1 = N1 * sizeof(int);
+
+    int *h_A = (int*)malloc(size1);
+    int *h_B = (int*)malloc(size1);
+    int *h_C = (int*)malloc(size1);
+
+    printf("Enter elements of vector A:\n");
+    for (int i = 0; i < N1; i++) scanf("%d", &h_A[i]);
+
+    printf("Enter elements of vector B:\n");
+    for (int i = 0; i < N1; i++) scanf("%d", &h_B[i]);
+
+    int *d_A, *d_B, *d_C;
+    cudaMalloc((void**)&d_A, size1);
+    cudaMalloc((void**)&d_B, size1);
+    cudaMalloc((void**)&d_C, size1);
+
+    cudaMemcpy(d_A, h_A, size1, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, h_B, size1, cudaMemcpyHostToDevice);
+
+    vectorAdd<<<(N1 + 255) / 256, 256>>>(d_A, d_B, d_C, N1);
+
+    cudaMemcpy(h_C, d_C, size1, cudaMemcpyDeviceToHost);
+
+    printf("\nVector Addition Result:\n");
+    for (int i = 0; i < N1; i++) printf("%d ", h_C[i]);
+    printf("\n\n");
+
+    cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+
+    // ================= MATRIX MULTIPLICATION =================
+    int N2;
+    printf("Enter size of square matrix: ");
+    scanf("%d", &N2);
+
+    int size2 = N2 * N2 * sizeof(int);
+
+    int *h_M1 = (int*)malloc(size2);
+    int *h_M2 = (int*)malloc(size2);
+    int *h_Result = (int*)malloc(size2);
+
+    printf("Enter elements of Matrix A:\n");
+    for (int i = 0; i < N2 * N2; i++) scanf("%d", &h_M1[i]);
+
+    printf("Enter elements of Matrix B:\n");
+    for (int i = 0; i < N2 * N2; i++) scanf("%d", &h_M2[i]);
+
+    int *d_M1, *d_M2, *d_Result;
+    cudaMalloc((void**)&d_M1, size2);
+    cudaMalloc((void**)&d_M2, size2);
+    cudaMalloc((void**)&d_Result, size2);
+
+    cudaMemcpy(d_M1, h_M1, size2, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_M2, h_M2, size2, cudaMemcpyHostToDevice);
+
+    dim3 block(16, 16);
+    dim3 grid((N2 + 15) / 16, (N2 + 15) / 16);
+
+    matrixMultiply<<<grid, block>>>(d_M1, d_M2, d_Result, N2);
+
+    cudaMemcpy(h_Result, d_Result, size2, cudaMemcpyDeviceToHost);
+
+    printf("\nMatrix Multiplication Result:\n");
+    for (int i = 0; i < N2; i++) {
+        for (int j = 0; j < N2; j++) {
+            printf("%d ", h_Result[i * N2 + j]);
+        }
+        printf("\n");
+    }
+
+    cudaFree(d_M1); cudaFree(d_M2); cudaFree(d_Result);
+
+    return 0;
+}
+
+
+\\DL1
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, classification_report
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Embedding, GlobalMaxPooling1D
+import re
+
+from tensorflow.keras.preprocessing.text import Tokenizer
+
+df_main = pd.read_csv("./IMDB Dataset.csv")
+
+df_main['sentiment'] = df_main['sentiment'].map({
+    "positive":1,
+    "negative":0
+})
+
+def clean(text):
+  text = text.lower()
+  text = re.sub("<.*?>","",text)
+  text = re.sub("[^a-zA-Z]","",text)
+  text = re.sub("\s+","",text)
+  return text
+
+df_main["cleaned_text"]=df_main['review'].apply(clean)
+
+X_train,X_test,Y_train,Y_test = train_test_split(df_main["clean_text"],df_main["sentiment"],stratify="sentiment",random_state=42,train_size=0.7)
+
+tokenizer = Tokenizer(num_words=10000,oov_token="<OOV>")
+tokenizer.fit_on_texts(X_train)
+
+X_train_sq = tokenizer.texts_to_sequences(X_train)
+X_test_sq =  tokenizer.texts_to_sequences(X_test)
+
+X_train_sq = keras.preprocessing.sequence.pad_sequences(X_train_sq,maxlen=500)
+X_test_sq = keras.preprocessing.sequence.pad_sequences(X_test_sq,maxlen=500)
+
+model = Sequential()
+model.add(Embedding(10000,100,500))
+model.add(GlobalMaxPooling1D())
+model.add(Dense(256,activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(1,activation='sigmoid'))
+
+model.compile(loss='binary_crossentropy',optimizer='adam',metrics=['accuracy'])
+
+model.fit(X_train,Y_train,epoch=10,batch_size=64,validation_data=(X_test,Y_test))
+
+Y_pred_pp = model.predict(X_test)
+Ypred = (Y_pred_pp >0.5).astype(int)
+
+cm = classification_report(Y_test,Ypred)
+print(cm)
+
+\\DL2
+
+import pandas as pd
+import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D,Dense,MaxPooling2D,Flatten
+from tensorflow.keras.datasets import fashion_mnist
+
+df_train = pd.read_csv('/content/fashion-mnist_train.csv')
+df_test = pd.read_csv('/content/fashion-mnist_test.csv')
+#(X_train,Y_train),(X_test,Y_test) = fashion_mnist.load_data()
+
+X_train = df_train.iloc[:,1:]/255.0
+X_test = df_test.iloc[:,1:]/255.0
+Y_train = df_train.iloc[:,0]
+Y_test = df_train.iloc[:,0]
+
+# X_train = X_train/255.0
+# X_test = X_test/255.0
+
+X_train = X_train.values.reshape(-1,28,28,1)
+X_test = X_test.values.reshape(-1,28,28,1)
+# X_train = X_train.reshape(-1,28,28,1)
+# X_test = X_test.reshape(-1,28,28,1)
+
+model = Sequential()
+model.add(Conv2D(32,kernel_size=(3,3),input_shape=(28,28,1),activation="relu"))
+model.add(MaxPooling2D(pool_size=(2,2)))
+model.add(Flatten())
+model.add(Dense(128,activation="relu"))
+model.add(Dense(10,activation="softmax"))
+
+model.compile(loss=keras.losses.SparseCategoricalCrossentropy(),optimizer=keras.optimizers.Adam(),metrics=["accuracy"])
+model.fit(X_train,Y_train,batch_size=128,epochs=10,verbose=1,validation_data=(X_test,Y_test))
+
+loss,accuracy = model.evaluate(X_test,Y_test,verbose=0)
+print("Test loss:",loss)
+print("Test accuracy:",accuracy)
+
+\\DL3
+
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import matplotlib.pyplot as plt
+
+"""<a id="1"></a>
+# Importing Data
+"""
+
+# importing the training set
+data_train = pd.read_csv("Google_Stock_Price_Train.csv")
+data_train.head()
+
+train = data_train.loc[:,["Open"]].values
+print(train.shape)
+print(train)
+
+# Feature Scaling
+from sklearn.preprocessing import MinMaxScaler
+scaler = MinMaxScaler(feature_range=(0,1))
+
+train_scaled = scaler.fit_transform(train)
+print(train_scaled)
+
+# create a data structure with 50 timesteps and 1 output
+
+x_train = []
+y_train = []
+timesteps = 20
+
+for i in range(timesteps, 1258):
+    x_train.append(train_scaled[i - timesteps:i])
+    y_train.append(train_scaled[i])
+x_train, y_train = np.array(x_train), np.array(y_train)
+print(x_train)
+# print(y_train)
+
+# Reshaping
+
+# x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+# print(x_train)
+# print(y_train)
+
+"""<a id="2"></a>
+# Create RNN Model
+"""
+
+# Create RNN Model
+
+# Importing the Keras Libraries and packages
+from keras.models import Sequential
+from keras.layers import Dense, SimpleRNN, Dropout
+
+# initialisinig the RNN
+regressor = Sequential()
+
+# adding the first RNN layer and some Dropout regularisation
+regressor.add(SimpleRNN(units = 100, activation="relu", return_sequences=True ,input_shape = (x_train.shape[1], 1)))
+regressor.add(Dropout(0.2))
+
+# adding the second RNN layer and some Dropout regularisation
+regressor.add(SimpleRNN(units = 100, activation="relu", return_sequences=True))
+regressor.add(Dropout(0.2))
+
+# adding the third RNN layer and some Dropout regularisation
+regressor.add(SimpleRNN(units = 100 , activation="relu", return_sequences=True))
+regressor.add(Dropout(0.2))
+
+# adding the fourth RNN layer and some Dropout regularisation
+regressor.add(SimpleRNN(units = 100))
+regressor.add(Dropout(0.2))
+
+# Adding thw output Layer
+regressor.add(Dense(units=1))
+
+# Compiling the RNN
+regressor.compile(optimizer= "adam", loss = "mse")
+
+# Fitting the RNN to the Training set
+regressor.fit(x_train, y_train, epochs = 10, batch_size = 1)
+
+# Getting the real stock price of 2017
+
+data_test = pd.read_csv("Google_Stock_Price_Test.csv")
+data_test.head()
+
+real_stock_price = data_test.loc[:, ["Open"]].values
+print(real_stock_price)
+
+# Getting the predicted stock price of 2017
+
+data_total = pd.concat((data_train["Open"], data_test["Open"]), axis = 0)
+# print(data_total)
+inputs = data_total[len(data_total) - len(data_test) - timesteps:].values.reshape(-1,1)
+print(inputs)
+inputs = scaler.transform(inputs) # min max scaler
+# inputs
+
+x_test = []
+for i in range(timesteps, 70):
+    if len(inputs[i-timesteps:i]) == timesteps:
+        x_test.append(inputs[i-timesteps:i])
+
+x_test = np.array(x_test)
+# x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
+predicte_stock_price = regressor.predict(x_test)
+predicte_stock_price = scaler.inverse_transform(predicte_stock_price)
+
+# visualising the results
+plt.plot(real_stock_price, color = "red", label = "Real Google Stock Price")
+plt.plot(predicte_stock_price, color = "blue", label = "Predicted Google Stock Price")
+plt.title("Google Stock Price prediction")
+plt.xlabel("Time")
+plt.ylabel("Google Stock Price")
+plt.legend()
+plt.show()
+
+print(predicte_stock_price)
